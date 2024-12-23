@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Health Advisor</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<style>
+    body { 
+    margin: 0; 
+    overflow: hidden; 
+    font-family: 'Inter', sans-serif;
+    background: #1a1a1a;
+    color: #ffffff;
+}
+
+#scene-container { 
+    position: fixed; 
+    width: 100vw; 
+    height: 100vh; 
+}
+
+.ui-overlay {
+    position: fixed;
+    z-index: 100;
+    pointer-events: none;
+}
+
+#info {
+    top: 20px;
+    left: 20px;
+    background: rgba(0,0,0,0.8);
+    padding: 15px;
+    border-radius: 10px;
+    font-size: 16px;
+    max-width: 350px;
+    backdrop-filter: blur(5px);
+    pointer-events: auto;
+}
+
+#controls {
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 15px;
+    pointer-events: auto;
+}
+
+.btn {
+    padding: 12px 24px;
+    font-size: 16px;
+    cursor: pointer;
+    background-color: #2563eb;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    transition: all 0.3s ease;
+}
+
+.btn:hover {
+    background-color: #1d4ed8;
+    transform: translateY(-2px);
+}
+
+.popup-card {
+    display: none;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(255,255,255,0.95);
+    color: #333;
+    padding: 25px;
+    border-radius: 15px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+    max-width: 90%;
+    max-height: 90vh;
+    overflow-y: auto;
+    z-index: 200;
+    backdrop-filter: blur(10px);
+}
+
+.recommendation-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 15px;
+}
+
+.recommendation-table th,
+.recommendation-table td {
+    padding: 12px;
+    border: 1px solid #e5e7eb;
+    text-align: left;
+}
+
+.recommendation-table th {
+    background-color: #f3f4f6;
+    font-weight: 600;
+}
+
+@media (max-width: 768px) {
+    .recommendation-table {
+        font-size: 14px;
+    }
+
+    .recommendation-table th,
+    .recommendation-table td {
+        padding: 8px;
+    }
+
+    .popup-card {
+        padding: 15px;
+    }
+}
+
+@media (max-width: 480px) {
+    .recommendation-table {
+        font-size: 12px;
+    }
+
+    .recommendation-table th,
+    .recommendation-table td {
+        padding: 6px;
+    }
+
+    .popup-card {
+        padding: 10px;
+    }
+}
+
+
+</style></head>
+<body>
+    <div id="scene-container"></div>
+    <div id="info" class="ui-overlay">
+        Click on the body parts to see health recommendations
+    </div>
+    <div id="controls" class="ui-overlay">
+        <button class="btn" id="rotateBtn">Rotate Model</button>
+        <button class="btn" id="resetViewBtn">Reset View</button>
+    </div>
+    <div id="popup" class="popup-card">
+        <h2 id="popupTitle"></h2>
+        <div id="popupContent"></div>
+        <button class="btn" id="closePopup">Close</button>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.9.1/gsap.min.js"></script>
+    <script>
+        let scene, camera, renderer;
+let humanModel;
+
+function init() {
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.getElementById('scene-container').appendChild(renderer.domElement);
+
+    camera.position.z = 5;
+
+    createHumanModel();
+
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(ambientLight);
+
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    directionalLight.position.set(0, 1, 1);
+    scene.add(directionalLight);
+
+    window.addEventListener('resize', onWindowResize, false);
+    document.addEventListener('click', onDocumentClick, false);
+    document.getElementById('rotateBtn').addEventListener('click', rotateModel);
+    document.getElementById('resetViewBtn').addEventListener('click', resetView);
+    document.getElementById('closePopup').addEventListener('click', closePopup);
+
+    animate();
+}
+
+function createHumanModel() {
+    humanModel = new THREE.Group();
+
+    const headGeometry = new THREE.SphereGeometry(0.4, 32, 32);
+    const bodyGeometry = new THREE.CylinderGeometry(0.5, 0.5, 1.5, 32);
+    const armGeometry = new THREE.CylinderGeometry(0.1, 0.1, 1, 32);
+    const legGeometry = new THREE.CylinderGeometry(0.15, 0.15, 1.5, 32);
+
+    const material = new THREE.MeshPhongMaterial({ color: 0xcccccc });
+
+    const head = new THREE.Mesh(headGeometry, material);
+    head.position.y = 2.2;
+    head.name = 'head';
+
+    const body = new THREE.Mesh(bodyGeometry, material);
+    body.position.y = 0.75;
+    body.name = 'body';
+
+    const leftArm = new THREE.Mesh(armGeometry, material);
+    leftArm.position.set(-0.7, 1, 0);
+    leftArm.rotation.z = -Math.PI / 16;
+    leftArm.name = 'leftArm';
+
+    const rightArm = new THREE.Mesh(armGeometry, material);
+    rightArm.position.set(0.7, 1, 0);
+    rightArm.rotation.z = Math.PI / 16;
+    rightArm.name = 'rightArm';
+
+    const leftLeg = new THREE.Mesh(legGeometry, material);
+    leftLeg.position.set(-0.3, -0.75, 0);
+    leftLeg.name = 'leftLeg';
+
+    const rightLeg = new THREE.Mesh(legGeometry, material);
+    rightLeg.position.set(0.3, -0.75, 0);
+    rightLeg.name = 'rightLeg';
+
+    humanModel.add(head, body, leftArm, rightArm, leftLeg, rightLeg);
+    scene.add(humanModel);
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+    renderer.render(scene, camera);
+}
+
+function onWindowResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+function onDocumentClick(event) {
+    event.preventDefault();
+
+    const mouse = new THREE.Vector2();
+    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(mouse, camera);
+
+    const intersects = raycaster.intersectObjects(humanModel.children);
+
+    if (intersects.length > 0) {
+        const clickedPart = intersects[0].object;
+        showRecommendation(clickedPart.name);
+    }
+}
+
+function showRecommendation(partName) {
+    const popup = document.getElementById('popup');
+    const popupTitle = document.getElementById('popupTitle');
+    const popupContent = document.getElementById('popupContent');
+
+    popupTitle.textContent = `Health Recommendations for ${partName.charAt(0).toUpperCase() + partName.slice(1)}`;
+    
+    if (partName === 'head') {
+        const recommendations = getHeadRecommendations();
+        popupContent.innerHTML = `
+            <table class="recommendation-table">
+                <thead>
+                    <tr>
+                        <th>Medicines</th>
+                        <th>Food</th>
+                        <th>Recommendations</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>${recommendations.medicines.join('<br>')}</td>
+                        <td>${recommendations.food.join('<br>')}</td>
+                        <td>${recommendations.recommendations.join('<br>')}</td>
+                    </tr>
+                </tbody>
+            </table>
+        `;
+    } else {
+        const recommendations = getAIRecommendations(partName);
+        popupContent.innerHTML = `
+            <ul class="recommendation-list">
+                ${recommendations.map(rec => `<li>${rec}</li>`).join('')}
+            </ul>
+        `;
+    }
+
+    gsap.to(popup, { display: 'block', opacity: 1, duration: 0.3 });
+}
+
+function closePopup() {
+    const popup = document.getElementById('popup');
+    gsap.to(popup, { opacity: 0, duration: 0.3, onComplete: () => {
+        popup.style.display = 'none';
+    }});
+}
+
+function getHeadRecommendations() {
+    return {
+        medicines: [
+            "Acetaminophen for headaches",
+            "Antihistamines for allergies",
+            "Decongestants for sinus issues"
+        ],
+        food: [
+            "Omega-3 rich foods (fish, nuts)",
+            "Antioxidant-rich berries",
+            "Green leafy vegetables"
+        ],
+        recommendations: [
+            "Practice mindfulness meditation",
+            "Ensure 7-9 hours of quality sleep",
+            "Limit screen time before bed"
+        ]
+    };
+}
+
+function getAIRecommendations(partName) {
+    const recommendations = {
+        body: [
+            "Maintain good posture throughout the day",
+            "Practice deep breathing exercises for stress relief",
+            "Engage in regular cardiovascular exercise"
+        ],
+        leftArm: [
+            "Perform arm stretches to improve flexibility",
+            "Include arm strengthening exercises in your routine",
+            "Take regular breaks if you do repetitive arm movements"
+        ],
+        rightArm: [
+            "Balance your arm exercises to maintain symmetry",
+            "Use ergonomic tools to reduce strain on your arms",
+            "Practice proper form when lifting objects"
+        ],
+        leftLeg: [
+            "Incorporate leg stretches into your daily routine",
+            "Engage in regular leg strengthening exercises",
+            "Wear supportive footwear for better leg health"
+        ],
+        rightLeg: [
+            "Maintain a balanced exercise routine for both legs",
+            "Practice proper walking and running techniques",
+            "Consider using compression socks for better circulation"
+        ]
+    };
+
+    return recommendations[partName] || ["No specific recommendations available for this body part."];
+}
+
+function rotateModel() {
+    gsap.to(humanModel.rotation, {
+        y: humanModel.rotation.y + Math.PI * 2,
+        duration: 2,
+        ease: "power2.inOut"
+    });
+}
+
+function resetView() {
+    gsap.to(camera.position, {
+        x: 0,
+        y: 0,
+        z: 5,
+        duration: 1,
+        ease: "power2.inOut"
+    });
+
+    gsap.to(humanModel.rotation, {
+        x: 0,
+        y: 0,
+        z: 0,
+        duration: 1,
+        ease: "power2.inOut"
+    });
+}
+
+// Initialize the application
+init();
+
+
+    </script>
+</body>
+</html>
