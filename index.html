@@ -3,15 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Health Advisor</title>
+    <title>Advanced 3D Health Advisor</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
 <style>
-    body { 
+    :root {
+    --primary-color: #2563eb;
+    --secondary-color: #1d4ed8;
+    --background-color: #1a1a1a;
+    --text-color: #ffffff;
+    --popup-background: rgba(255, 255, 255, 0.95);
+    --popup-text-color: #333333;
+}
+
+body { 
     margin: 0; 
     overflow: hidden; 
     font-family: 'Inter', sans-serif;
-    background: #1a1a1a;
-    color: #ffffff;
+    background: var(--background-color);
+    color: var(--text-color);
 }
 
 #scene-container { 
@@ -29,7 +38,7 @@
 #info {
     top: 20px;
     left: 20px;
-    background: rgba(0,0,0,0.8);
+    background: rgba(0, 0, 0, 0.8);
     padding: 15px;
     border-radius: 10px;
     font-size: 16px;
@@ -51,15 +60,15 @@
     padding: 12px 24px;
     font-size: 16px;
     cursor: pointer;
-    background-color: #2563eb;
-    color: white;
+    background-color: var(--primary-color);
+    color: var(--text-color);
     border: none;
     border-radius: 8px;
     transition: all 0.3s ease;
 }
 
 .btn:hover {
-    background-color: #1d4ed8;
+    background-color: var(--secondary-color);
     transform: translateY(-2px);
 }
 
@@ -69,11 +78,11 @@
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    background: rgba(255,255,255,0.95);
-    color: #333;
+    background: var(--popup-background);
+    color: var(--popup-text-color);
     padding: 25px;
     border-radius: 15px;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
     max-width: 90%;
     max-height: 90vh;
     overflow-y: auto;
@@ -99,7 +108,41 @@
     font-weight: 600;
 }
 
+#healthChart {
+    width: 100%;
+    max-width: 600px;
+    height: 300px;
+    margin-top: 20px;
+}
+
+#loading {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 24px;
+    color: var(--text-color);
+    z-index: 1000;
+}
+
 @media (max-width: 768px) {
+    #controls {
+        flex-direction: column;
+        left: 20px;
+        bottom: 20px;
+        transform: none;
+    }
+
+    .btn {
+        font-size: 14px;
+        padding: 10px 20px;
+    }
+
     .recommendation-table {
         font-size: 14px;
     }
@@ -112,9 +155,18 @@
     .popup-card {
         padding: 15px;
     }
+
+    #healthChart {
+        height: 250px;
+    }
 }
 
 @media (max-width: 480px) {
+    #info {
+        font-size: 14px;
+        max-width: 250px;
+    }
+
     .recommendation-table {
         font-size: 12px;
     }
@@ -127,8 +179,11 @@
     .popup-card {
         padding: 10px;
     }
-}
 
+    #healthChart {
+        height: 200px;
+    }
+}
 
 </style></head>
 <body>
@@ -137,20 +192,28 @@
         Click on the body parts to see health recommendations
     </div>
     <div id="controls" class="ui-overlay">
-        <button class="btn" id="rotateBtn">Rotate Model</button>
-        <button class="btn" id="resetViewBtn">Reset View</button>
+        <button class="btn" id="rotateBtn" data-tippy-content="Rotate the model">Rotate Model</button>
+        <button class="btn" id="resetViewBtn" data-tippy-content="Reset the camera view">Reset View</button>
+        <button class="btn" id="toggleXRayBtn" data-tippy-content="Toggle X-Ray view">Toggle X-Ray</button>
     </div>
     <div id="popup" class="popup-card">
         <h2 id="popupTitle"></h2>
         <div id="popupContent"></div>
+        <canvas id="healthChart"></canvas>
         <button class="btn" id="closePopup">Close</button>
     </div>
+    <div id="loading">Loading 3D Model...</div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.9.1/gsap.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/@popperjs/core@2"></script>
+    <script src="https://unpkg.com/tippy.js@6"></script>
     <script>
         let scene, camera, renderer;
-let humanModel;
+let humanModel, xRayMaterial;
+let isXRayMode = false;
+let healthChart;
 
 function init() {
     scene = new THREE.Scene();
@@ -174,7 +237,11 @@ function init() {
     document.addEventListener('click', onDocumentClick, false);
     document.getElementById('rotateBtn').addEventListener('click', rotateModel);
     document.getElementById('resetViewBtn').addEventListener('click', resetView);
+    document.getElementById('toggleXRayBtn').addEventListener('click', toggleXRayMode);
     document.getElementById('closePopup').addEventListener('click', closePopup);
+
+    // Initialize tooltips
+    tippy('[data-tippy-content]');
 
     animate();
 }
@@ -188,6 +255,12 @@ function createHumanModel() {
     const legGeometry = new THREE.CylinderGeometry(0.15, 0.15, 1.5, 32);
 
     const material = new THREE.MeshPhongMaterial({ color: 0xcccccc });
+    xRayMaterial = new THREE.MeshPhongMaterial({
+        color: 0x3498db,
+        transparent: true,
+        opacity: 0.6,
+        wireframe: true
+    });
 
     const head = new THREE.Mesh(headGeometry, material);
     head.position.y = 2.2;
@@ -217,6 +290,9 @@ function createHumanModel() {
 
     humanModel.add(head, body, leftArm, rightArm, leftLeg, rightLeg);
     scene.add(humanModel);
+
+    // Hide loading screen
+    document.getElementById('loading').style.display = 'none';
 }
 
 function animate() {
@@ -255,34 +331,28 @@ function showRecommendation(partName) {
 
     popupTitle.textContent = `Health Recommendations for ${partName.charAt(0).toUpperCase() + partName.slice(1)}`;
     
-    if (partName === 'head') {
-        const recommendations = getHeadRecommendations();
-        popupContent.innerHTML = `
-            <table class="recommendation-table">
-                <thead>
-                    <tr>
-                        <th>Medicines</th>
-                        <th>Food</th>
-                        <th>Recommendations</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>${recommendations.medicines.join('<br>')}</td>
-                        <td>${recommendations.food.join('<br>')}</td>
-                        <td>${recommendations.recommendations.join('<br>')}</td>
-                    </tr>
-                </tbody>
-            </table>
-        `;
-    } else {
-        const recommendations = getAIRecommendations(partName);
-        popupContent.innerHTML = `
-            <ul class="recommendation-list">
-                ${recommendations.map(rec => `<li>${rec}</li>`).join('')}
-            </ul>
-        `;
-    }
+    const recommendations = getRecommendations(partName);
+    
+    popupContent.innerHTML = `
+        <table class="recommendation-table">
+            <thead>
+                <tr>
+                    <th>Medicines</th>
+                    <th>Food</th>
+                    <th>Recommendations</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>${recommendations.medicines.join('<br>')}</td>
+                    <td>${recommendations.food.join('<br>')}</td>
+                    <td>${recommendations.recommendations.join('<br>')}</td>
+                </tr>
+            </tbody>
+        </table>
+    `;
+
+    updateHealthChart(recommendations);
 
     gsap.to(popup, { display: 'block', opacity: 1, duration: 0.3 });
 }
@@ -294,56 +364,162 @@ function closePopup() {
     }});
 }
 
-function getHeadRecommendations() {
-    return {
-        medicines: [
-            "Acetaminophen for headaches",
-            "Antihistamines for allergies",
-            "Decongestants for sinus issues"
-        ],
-        food: [
-            "Omega-3 rich foods (fish, nuts)",
-            "Antioxidant-rich berries",
-            "Green leafy vegetables"
-        ],
-        recommendations: [
-            "Practice mindfulness meditation",
-            "Ensure 7-9 hours of quality sleep",
-            "Limit screen time before bed"
-        ]
+function getRecommendations(partName) {
+    const recommendations = {
+        head: {
+            medicines: [
+                "Acetaminophen for headaches",
+                "Antihistamines for allergies",
+                "Decongestants for sinus issues"
+            ],
+            food: [
+                "Omega-3 rich foods (fish, nuts)",
+                "Antioxidant-rich berries",
+                "Green leafy vegetables"
+            ],
+            recommendations: [
+                "Practice mindfulness meditation",
+                "Ensure 7-9 hours of quality sleep",
+                "Limit screen time before bed"
+            ]
+        },
+        body: {
+            medicines: [
+                "Multivitamins for overall health",
+                "Probiotics for gut health",
+                "Antacids for digestive issues"
+            ],
+            food: [
+                "Lean proteins (chicken, fish, tofu)",
+                "Whole grains",
+                "Fermented foods for gut health"
+            ],
+            recommendations: [
+                "Maintain good posture",
+                "Practice deep breathing exercises",
+                "Engage in regular cardiovascular exercise"
+            ]
+        },
+        leftArm: {
+            medicines: [
+                "Topical pain relievers",
+                "Anti-inflammatory medication",
+                "Muscle relaxants (if prescribed)"
+            ],
+            food: [
+                "Foods rich in magnesium (nuts, seeds)",
+                "Protein-rich foods for muscle repair",
+                "Anti-inflammatory foods (turmeric, ginger)"
+            ],
+            recommendations: [
+                "Perform arm stretches regularly",
+                "Include arm strengthening exercises",
+                "Take breaks during repetitive arm movements"
+            ]
+        },
+        rightArm: {
+            medicines: [
+                "Topical pain relievers",
+                "Anti-inflammatory medication",
+                "Muscle relaxants (if prescribed)"
+            ],
+            food: [
+                "Foods rich in magnesium (nuts, seeds)",
+                "Protein-rich foods for muscle repair",
+                "Anti-inflammatory foods (turmeric, ginger)"
+            ],
+            recommendations: [
+                "Balance arm exercises",
+                "Use ergonomic tools to reduce strain",
+                "Practice proper form when lifting objects"
+            ]
+        },
+        leftLeg: {
+            medicines: [
+                "Topical pain relievers",
+                "Anti-inflammatory medication",
+                "Muscle relaxants (if prescribed)"
+            ],
+            food: [
+                "Foods rich in calcium and vitamin D",
+                "Protein-rich foods for muscle strength",
+                "Foods high in potassium (bananas, avocados)"
+            ],
+            recommendations: [
+                "Incorporate leg stretches into daily routine",
+                "Engage in regular leg strengthening exercises",
+                "Wear supportive footwear"
+            ]
+        },
+        rightLeg: {
+            medicines: [
+                "Topical pain relievers",
+                "Anti-inflammatory medication",
+                "Muscle relaxants (if prescribed)"
+            ],
+            food: [
+                "Foods rich in calcium and vitamin D",
+                "Protein-rich foods for muscle strength",
+                "Foods high in potassium (bananas, avocados)"
+            ],
+            recommendations: [
+                "Maintain a balanced exercise routine",
+                "Practice proper walking and running techniques",
+                "Consider using compression socks for circulation"
+            ]
+        }
+    };
+
+    return recommendations[partName] || {
+        medicines: ["No specific medicines recommended"],
+        food: ["Maintain a balanced diet"],
+        recommendations: ["Consult a healthcare professional for personalized advice"]
     };
 }
 
-function getAIRecommendations(partName) {
-    const recommendations = {
-        body: [
-            "Maintain good posture throughout the day",
-            "Practice deep breathing exercises for stress relief",
-            "Engage in regular cardiovascular exercise"
-        ],
-        leftArm: [
-            "Perform arm stretches to improve flexibility",
-            "Include arm strengthening exercises in your routine",
-            "Take regular breaks if you do repetitive arm movements"
-        ],
-        rightArm: [
-            "Balance your arm exercises to maintain symmetry",
-            "Use ergonomic tools to reduce strain on your arms",
-            "Practice proper form when lifting objects"
-        ],
-        leftLeg: [
-            "Incorporate leg stretches into your daily routine",
-            "Engage in regular leg strengthening exercises",
-            "Wear supportive footwear for better leg health"
-        ],
-        rightLeg: [
-            "Maintain a balanced exercise routine for both legs",
-            "Practice proper walking and running techniques",
-            "Consider using compression socks for better circulation"
-        ]
+function updateHealthChart(recommendations) {
+    const ctx = document.getElementById('healthChart').getContext('2d');
+    
+    if (healthChart) {
+        healthChart.destroy();
+    }
+
+    const data = {
+        labels: ['Medicines', 'Food', 'Recommendations'],
+        datasets: [{
+            label: 'Health Factors',
+            data: [
+                recommendations.medicines.length,
+                recommendations.food.length,
+                recommendations.recommendations.length
+            ],
+            backgroundColor: [
+                'rgba(255, 99, 132, 0.5)',
+                'rgba(54, 162, 235, 0.5)',
+                'rgba(255, 206, 86, 0.5)'
+            ],
+            borderColor: [
+                'rgba(255, 99, 132, 1)',
+                'rgba(54, 162, 235, 1)',
+                'rgba(255, 206, 86, 1)'
+            ],
+            borderWidth: 1
+        }]
     };
 
-    return recommendations[partName] || ["No specific recommendations available for this body part."];
+    healthChart = new Chart(ctx, {
+        type: 'radar',
+        data: data,
+        options: {
+            responsive: true,
+            scales: {
+                r: {
+                    beginAtZero: true,
+                    suggestedMax: 5
+                }
+            }
+        }
+    });
 }
 
 function rotateModel() {
@@ -369,6 +545,17 @@ function resetView() {
         z: 0,
         duration: 1,
         ease: "power2.inOut"
+    });
+}
+
+function toggleXRayMode() {
+    isXRayMode = !isXRayMode;
+    const material = isXRayMode ? xRayMaterial : new THREE.MeshPhongMaterial({ color: 0xcccccc });
+    
+    humanModel.traverse((child) => {
+        if (child.isMesh) {
+            child.material = material;
+        }
     });
 }
 
